@@ -34,30 +34,32 @@ extern exit
 global main
 
 section .bss
-display_name:    resq    1
-screen:         resd    1
-depth:          resd    1
-connection:     resd    1
-width:          resd    1
-height:         resd    1
-window:         resq    1
-gc:             resq    1
-
-; Arrays to store coordinates
-foyers_x:       times 50 dd 0    ; Array for foyer x coordinates (max 50 foyers)
-foyers_y:       times 50 dd 0    ; Array for foyer y coordinates
-points_x:       times 2000 dd 0  ; Array for point x coordinates (max 2000 points)
-points_y:       times 2000 dd 0  ; Array for point y coordinates
-num_foyers:     resd 1           ; Number of foyers to generate
-num_points:     resd 1           ; Number of points to generate
+display_name:	resq	1
+screen:			resd	1
+depth:         	resd	1
+connection:    	resd	1
+width:         	resd	1
+height:        	resd	1
+window:		resq	1
+gc:		resq	1
+foyers_x: resq 50    ; tableau pour stocker les coordonnées x des foyers
+foyers_y: resq 50    ; tableau pour stocker les coordonnées y des foyers
+nb_foyers: resd 1    ; nombre de foyers
+point_x: resd 1      ; coordonnée x du point courant
+point_y: resd 1      ; coordonnée y du point courant
+dist_temp: resd 1    ; distance temporaire pour les calculs
+min_dist: resd 1     ; distance minimale
+closest_foyer: resd 1 ; index du foyer le plus proche
 
 section .data
-event:          times 24 dq 0
-x1:             dd 0
-x2:             dd 0
-y1:             dd 0
-y2:             dd 0
-rand_seed:      dd 12345         ; Seed for random number generation
+
+event:		times	24 dq 0
+
+x1:	dd	0
+x2:	dd	0
+y1:	dd	0
+y2:	dd	0
+seed: dd 42          ; graine pour le générateur aléatoire
 
 section .text
 	
@@ -128,220 +130,89 @@ jmp boucle
 ;#########################################
 ;#		DEBUT DE LA ZONE DE DESSIN		 #
 ;#########################################
-; Random number generation function
-generate_random:
-    push rbp
-    mov rbp, rsp
-    mov eax, dword[rand_seed]
-    imul eax, 1103515245
-    add eax, 12345
-    mov dword[rand_seed], eax
-    mov edx, 0
-    div dword[rbp+16]    ; Divide by range parameter
-    mov eax, edx         ; Return remainder
-    pop rbp
-    ret
-
 dessin:
-    ; Set initial values
-    mov dword[num_foyers], 50     ; Number of foyers to generate
-    mov dword[num_points], 2000   ; Number of points to generate
-
-    ; Generate random foyers
-    mov ecx, dword[num_foyers]
-    xor esi, esi        ; Index counter
+    ; Générer les foyers
+    mov dword[nb_foyers], 15   ; on commence avec 15 foyers
+    
+    ; Boucle pour générer les foyers
+    xor r12, r12              ; compteur de foyers
 generate_foyers:
-    push rcx
+    ; Générer x aléatoire (0-399)
+    mov edi, 400
+    call random
+    mov [foyers_x + r12*8], eax
     
-    ; Generate X coordinate (0-400)
-    push 400
-    call generate_random
-    mov dword[foyers_x + esi*4], eax
+    ; Générer y aléatoire (0-399)
+    mov edi, 400
+    call random
+    mov [foyers_y + r12*8], eax
     
-    ; Generate Y coordinate (0-400)
-    push 400
-    call generate_random
-    mov dword[foyers_y + esi*4], eax
+    inc r12
+    cmp r12, [nb_foyers]
+    jl generate_foyers
     
-    inc esi
-    pop rcx
-    loop generate_foyers
-
-    ; Generate random points
-    mov ecx, dword[num_points]
-    xor esi, esi        ; Index counter
-generate_points:
-    push rcx
-    
-    ; Generate X coordinate (0-400)
-    push 400
-    call generate_random
-    mov dword[points_x + esi*4], eax
-    
-    ; Generate Y coordinate (0-400)
-    push 400
-    call generate_random
-    mov dword[points_y + esi*4], eax
-    
-    inc esi
-    pop rcx
-    loop generate_points
-
-    ; Draw points and connect to nearest foyers
-    mov ecx, dword[num_points]
-    xor esi, esi        ; Point index
+    ; Dessiner 1000 points
+    mov r13, 1000            ; nombre de points à dessiner
 draw_points:
-    push rcx
+    ; Générer point aléatoire
+    mov edi, 400
+    call random
+    mov [point_x], eax
     
-    ; Find nearest foyer for current point
-    mov ebx, 0          ; Current nearest foyer index
-    mov r12d, 0x7FFFFFFF ; Minimum distance (start with max int)
+    mov edi, 400
+    call random
+    mov [point_y], eax
     
-    mov r13d, dword[points_x + esi*4] ; Current point X
-    mov r14d, dword[points_y + esi*4] ; Current point Y
+    ; Trouver le foyer le plus proche
+    mov dword[min_dist], 0x7FFFFFFF  ; initialiser avec une grande valeur
+    xor r14, r14                     ; index du foyer courant
     
-    mov ecx, dword[num_foyers]
-    xor edi, edi        ; Foyer index
-find_nearest:
-    push rcx
+find_closest:
+    ; Calculer distance = (x2-x1)²+(y2-y1)²
+    mov eax, [foyers_x + r14*8]
+    sub eax, dword[point_x]
+    imul eax, eax                    ; (x2-x1)²
+    mov dword[dist_temp], eax
     
-    ; Calculate distance: (x2-x1)^2 + (y2-y1)^2
-    mov eax, dword[foyers_x + edi*4]
-    sub eax, r13d
-    imul eax, eax       ; (x2-x1)^2
-    mov r15d, eax
+    mov eax, [foyers_y + r14*8]
+    sub eax, dword[point_y]
+    imul eax, eax                    ; (y2-y1)²
+    add dword[dist_temp], eax        ; distance = (x2-x1)²+(y2-y1)²
     
-    mov eax, dword[foyers_y + edi*4]
-    sub eax, r14d
-    imul eax, eax       ; (y2-y1)^2
-    add r15d, eax       ; Total distance squared
+    ; Comparer avec la distance minimale
+    mov eax, dword[dist_temp]
+    cmp eax, dword[min_dist]
+    jge not_closer
+    mov dword[min_dist], eax
+    mov dword[closest_foyer], r14d
     
-    cmp r15d, r12d
-    jae not_closer
-    mov r12d, r15d      ; Update minimum distance
-    mov ebx, edi        ; Update nearest foyer index
 not_closer:
-    inc edi
-    pop rcx
-    loop find_nearest
+    inc r14
+    cmp r14, [nb_foyers]
+    jl find_closest
     
-    ; Draw line from point to nearest foyer
+    ; Dessiner la ligne entre le point et son foyer le plus proche
     mov rdi, qword[display_name]
     mov rsi, qword[gc]
-    mov edx, 0x000000   ; Black color
+    mov edx, 0x000000               ; couleur noire
     call XSetForeground
     
+    ; Dessiner la ligne
     mov rdi, qword[display_name]
     mov rsi, qword[window]
     mov rdx, qword[gc]
-    mov ecx, dword[points_x + esi*4]    ; Point X
-    mov r8d, dword[points_y + esi*4]     ; Point Y
-    mov r9d, dword[foyers_x + ebx*4]     ; Foyer X
-    push qword[foyers_y + ebx*4]         ; Foyer Y
+    mov ecx, dword[point_x]         ; x1
+    mov r8d, dword[point_y]         ; y1
+    mov r15d, dword[closest_foyer]
+    mov r9d, [foyers_x + r15*8]     ; x2
+    push qword[foyers_y + r15*8]    ; y2
     call XDrawLine
+    add rsp, 8                      ; nettoyer la pile
     
-    inc esi
-    pop rcx
-    loop draw_points
+    dec r13
+    jnz draw_points
 
     jmp flush
-
-;couleur du point 1
-mov rdi,qword[display_name]
-mov rsi,qword[gc]
-mov edx,0x0000FF	; Couleur du crayon ; bleu
-call XSetForeground
-mov rdi,qword[display_name]
-mov rsi,qword[window]
-mov rdx,qword[gc]
-mov rcx,10	; coordonnée en x
-mov r8,50	; coordonnée en y
-call XDrawPoint
-
-;couleur de la ligne 1
-mov rdi,qword[display_name]
-mov rsi,qword[gc]
-mov edx,0xFF0000	; Couleur du crayon ; rouge
-call XSetForeground
-; coordonnées de la ligne 1
-mov dword[x1],50
-mov dword[y1],50
-mov dword[x2],200
-mov dword[y2],350
-; dessin de la ligne 1
-mov rdi,qword[display_name]
-mov rsi,qword[window]
-mov rdx,qword[gc]
-mov ecx,dword[x1]	; coordonnée source en x
-mov r8d,dword[y1]	; coordonnée source en y
-mov r9d,dword[x2]	; coordonnée destination en x
-push qword[y2]		; coordonnée destination en y
-call XDrawLine
-
-;couleur de la ligne 2
-mov rdi,qword[display_name]
-mov rsi,qword[gc]
-mov edx,0x00FF00	; Couleur du crayon ; vert
-call XSetForeground
-; coordonnées de la ligne 2
-mov dword[x1],50
-mov dword[y1],350
-mov dword[x2],200
-mov dword[y2],50
-; dessin de la ligne 2
-mov rdi,qword[display_name]
-mov rsi,qword[window]
-mov rdx,qword[gc]
-mov ecx,dword[x1]	; coordonnée source en x
-mov r8d,dword[y1]	; coordonnée source en y
-mov r9d,dword[x2]	; coordonnée destination en x
-push qword[y2]		; coordonnée destination en y
-call XDrawLine
-
-;couleur de la ligne 3
-mov rdi,qword[display_name]
-mov rsi,qword[gc]
-mov edx,0x00FFFF	; Couleur du crayon ; bleu
-call XSetForeground
-; coordonnées de la ligne 3	
-mov dword[x1],275
-mov dword[y1],50
-mov dword[x2],275
-mov dword[y2],350
-; dessin de la ligne 3
-mov rdi,qword[display_name]
-mov rsi,qword[window]
-mov rdx,qword[gc]
-mov ecx,dword[x1]	; coordonnée source en x
-mov r8d,dword[y1]	; coordonnée source en y
-mov r9d,dword[x2]	; coordonnée destination en x
-push qword[y2]		; coordonnée destination en y
-call XDrawLine
-
-;couleur de la ligne 4
-mov rdi,qword[display_name]
-mov rsi,qword[gc]
-mov edx,0xFF00FF	; Couleur du crayon ; violet
-call XSetForeground
-; coordonnées de la ligne 4	
-mov dword[x1],350
-mov dword[y1],50
-mov dword[x2],350
-mov dword[y2],350
-; dessin de la ligne 4
-mov rdi,qword[display_name]
-mov rsi,qword[window]
-mov rdx,qword[gc]
-mov ecx,dword[x1]	; coordonnée source en x
-mov r8d,dword[y1]	; coordonnée source en y
-mov r9d,dword[x2]	; coordonnée destination en x
-push qword[y2]		; coordonnée destination en y
-call XDrawLine
-
-; ############################
-; # FIN DE LA ZONE DE DESSIN #
-; ############################
-jmp flush
 
 flush:
 mov rdi,qword[display_name]
@@ -356,4 +227,22 @@ closeDisplay:
     call    XCloseDisplay
     xor	    rdi,rdi
     call    exit
+	
+; Fonction pour générer un nombre aléatoire entre 0 et max-1
+random:
+    push rbp
+    mov rbp, rsp
+    
+    mov eax, dword[seed]
+    imul eax, 1103515245
+    add eax, 12345
+    mov dword[seed], eax
+    
+    xor edx, edx
+    div edi     ; divise par le paramètre max (dans edi)
+    mov eax, edx ; retourne le reste
+    
+    mov rsp, rbp
+    pop rbp
+    ret
 	
